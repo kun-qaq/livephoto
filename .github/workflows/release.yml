@@ -33,8 +33,10 @@ jobs:
         shell: pwsh
         run: |
           python -c "import imageio_ffmpeg,subprocess; subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-f','lavfi','-i','testsrc=size=320x240:rate=15:duration=2','-c:v','libx264','-pix_fmt','yuv420p','t.mp4'], check=True)"
-          .\dist\LivePhotoMaker.exe t.mp4 -n CI_SMOKE
-          if (-not (Test-Path "dist\output\CI_SMOKE.MOV")) { throw "smoke test failed" }
+          # pwsh does not wait for GUI-subsystem exes; use Start-Process -Wait
+          $p = Start-Process -FilePath ".\dist\LivePhotoMaker.exe" -ArgumentList "t.mp4","-n","CI_SMOKE" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "exe exited with code $($p.ExitCode)" }
+          if (-not (Test-Path "dist\output\CI_SMOKE.MOV")) { throw "smoke test failed: no output file" }
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
