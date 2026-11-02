@@ -1269,7 +1269,7 @@ def launch_gui():
     return launch_fluent()
 
 
-def launch_fluent(items_carry=None, mode="dark"):
+def launch_fluent(items_carry=None, mode="system"):
     """Windows 11 设置页风格界面(真·Fluent: ttk + Sun Valley 主题)。"""
     import tkinter as tk
     from tkinter import filedialog, messagebox

@@ -39,7 +39,8 @@ LivePhotoMaker.exe 视频.mp4 --crop portrait --livp
 
 ```bash
 pip install -r requirements.txt
-# 三个包: pillow + imageio-ffmpeg + customtkinter (GUI 美化; ffmpeg 二进制首次使用时自动下载)
+# 依赖: pillow + imageio-ffmpeg + sv-ttk + pywinstyles + darkdetect
+# (GUI 用 sv-ttk 的 Win11 Fluent 皮肤; ffmpeg 二进制由 imageio-ffmpeg 提供, 首次使用时自动下载)
 ```
 
 ---
@@ -56,7 +57,7 @@ python livephoto.py          # 不带参数 = 打开图形界面
 
 或直接**双击** `livephoto.py`。
 
-界面采用 **Windows 11 设置页风格**（CustomTkinter + DWM 原生深色标题栏），左侧导航切换三个页面：
+界面采用 **Windows 11 设置页风格**（sv-ttk Fluent 皮肤 + 原生深色标题栏，字体为开源思源黑体 / Noto Sans SC），左侧导航切换三个页面：
 
 1. **视频素材**
    - `＋ 添加视频`（可多选）/ `＋ 添加文件夹`（批量），选中某一行自动加载预览
@@ -70,9 +71,8 @@ python livephoto.py          # 不带参数 = 打开图形界面
    - 开关：打包 `.livp`、无损模式、完成后打开输出文件夹
    - 点 **开始转换**，进度条 + 日志实时显示，完成后右下角弹出 Toast 通知
 
-> 左下角可切换**浅色模式**（保留已添加的视频列表）。
+> 界面**默认跟随 Windows 系统深浅色**自动切换；左下角的开关可手动在浅色 / 深色间覆盖（下次启动仍按系统主题）。
 > 批量时，裁剪/时间/封面等设置对所有视频**统一生效**（预览以选中项为准）。
-> 未安装 customtkinter 时自动降级为经典 tkinter 界面。
 
 ### 命令行
 
@@ -188,8 +188,11 @@ iOS「照片」App 靠这**同一个 UUID** 把两文件配对成实况图：相
 
 | 包 | 用途 |
 |---|---|
-| `pillow` | GUI 预览图加载显示；`pair` 转换非 JPEG 封面 |
+| `pillow` | GUI 预览图加载显示；`pair` 转换非 JPEG 封面；图纸占位文字 |
 | `imageio-ffmpeg` | 提供 ffmpeg 二进制（也支持用 PATH 里的 ffmpeg） |
+| `sv-ttk` | Win11 Fluent 皮肤（GUI 美化） |
+| `pywinstyles` | 原生深色标题栏 / 边框配色 |
+| `darkdetect` | 跟随 Windows 系统深浅色 |
 | `tkinter` | 图形界面（Python 标准库自带；CLI 不需要） |
 
 ## 打包 exe（PyInstaller）

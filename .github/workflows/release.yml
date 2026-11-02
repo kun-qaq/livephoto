@@ -17,14 +17,14 @@ jobs:
           python-version: "3.12"
 
       - name: Install deps
-        run: pip install pillow imageio-ffmpeg sv-ttk pywinstyles pyinstaller
+        run: pip install pillow imageio-ffmpeg sv-ttk pywinstyles darkdetect pyinstaller
 
       - name: Build exe
         run: |
           pyinstaller --noconfirm --onefile --noconsole --name LivePhotoMaker `
             --icon icon.ico `
             --collect-data imageio_ffmpeg `
-            --collect-data sv_ttk `
+            --collect-all sv_ttk `
             --exclude-module imageio `
             --exclude-module numpy `
             --exclude-module matplotlib `
