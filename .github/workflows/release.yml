@@ -34,10 +34,9 @@ jobs:
         shell: pwsh
         run: |
           python -c "import imageio_ffmpeg,subprocess; subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-f','lavfi','-i','testsrc=size=320x240:rate=15:duration=2','-c:v','libx264','-pix_fmt','yuv420p','t.mp4'], check=True)"
-          # pwsh does not wait for GUI-subsystem exes; use Start-Process -Wait
-          # ArgumentList 必须是单个字符串, 数组会触发 "Error splitting the argument list"
-          $p = Start-Process -FilePath ".\dist\LivePhotoMaker.exe" -ArgumentList "t.mp4 -n CI_SMOKE" -Wait -PassThru -NoNewWindow
-          if ($p.ExitCode -ne 0) { throw "exe exited with code $($p.ExitCode)" }
+          # 用 Python subprocess 启动 GUI-subsystem exe: 它会正确等待退出并逐项传参,
+          # 绕开 PowerShell Start-Process -ArgumentList 的 "Error splitting the argument list" 解析坑。
+          python -c "import subprocess,sys; r=subprocess.run([r'.\dist\LivePhotoMaker.exe','t.mp4','-n','CI_SMOKE']); print('exe exit',r.returncode); sys.exit(r.returncode)"
           if (-not (Test-Path "dist\output\CI_SMOKE.MOV")) { throw "smoke test failed: no output file" }
 
       - name: Upload to GitHub Release
