@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+build/
+dist/
+output/
+*.livp
+exe_test/
+test_*.mp4
+test_src.mp4
+icon_preview.png
+*.spec
+.idea/
