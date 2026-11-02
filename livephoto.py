@@ -1258,230 +1258,239 @@ def cmd_pair(argv):
 # ===========================================================================
 
 def launch_gui():
-    """GUI 入口: 优先 Fluent 界面, 没装 customtkinter 则降级到经典界面。"""
+    """GUI 入口: 优先真·Fluent 界面(sv_ttk), 缺依赖则降级到经典界面。"""
     try:
-        import customtkinter as _ctk  # noqa: F401
-    except ImportError:
+        import sv_ttk  # noqa: F401
+        import pywinstyles  # noqa: F401
+        from PIL import Image  # noqa: F401
+        import fluent_shell  # noqa: F401
+    except Exception:
         return launch_gui_classic()
     return launch_fluent()
 
 
 def launch_fluent(items_carry=None, mode="dark"):
-    """Windows 11 设置页风格界面: 左侧导航 + 卡片式设置页 + 动画。"""
+    """Windows 11 设置页风格界面(真·Fluent: ttk + Sun Valley 主题)。"""
     import tkinter as tk
     from tkinter import filedialog, messagebox
-    import customtkinter as ctk
-    from PIL import Image, ImageTk
     import tempfile
-    import math
-
-    ctk.set_appearance_mode(mode)
-    ctk.set_widget_scaling(1.0)
-    ctk.set_window_scaling(1.0)
-
-    # ---- 调色板 (Win11 Settings 风) ----
-    DARK = {"bg": "#202020", "card": "#2b2b2b", "card2": "#333333", "hover": "#383838",
-            "sel": "#3a3a3a", "text": "#ffffff", "sub": "#9e9e9e",
-            "accent": "#4cc2ff", "accent_h": "#33aee0", "accent_t": "#000000",
-            "entry": "#1a1a1a", "border": "#3f3f3f", "canvas": "#101010"}
-    LIGHT = {"bg": "#f3f3f3", "card": "#ffffff", "card2": "#eaeaea", "hover": "#e9e9e9",
-             "sel": "#e0e0e0", "text": "#1b1b1b", "sub": "#5c5c5c",
-             "accent": "#005fb8", "accent_h": "#1a6fc4", "accent_t": "#ffffff",
-             "entry": "#fbfbfb", "border": "#d6d6d6", "canvas": "#1d1d1d"}
-    P = DARK if mode == "dark" else LIGHT
-
-    # ---- 字体 (Win11 Segoe UI Variable, 中文自动回退雅黑) ----
-    try:
-        F_NAV = ctk.CTkFont(family="Segoe UI Variable Text", size=14)
-        F_TITLE = ctk.CTkFont(family="Segoe UI Variable Display", size=24, weight="bold")
-        F_H2 = ctk.CTkFont(family="Segoe UI Variable Text", size=14, weight="bold")
-        F_BODY = ctk.CTkFont(family="Segoe UI Variable Text", size=13)
-        F_SMALL = ctk.CTkFont(family="Segoe UI Variable Text", size=12)
-        F_MONO = ctk.CTkFont(family="Cascadia Mono", size=12)
-    except Exception:
-        F_NAV = F_TITLE = F_H2 = F_BODY = F_SMALL = F_MONO = None
-
-    root = ctk.CTk()
-    root.title(f"LivePhoto 制作工具 v{VERSION}")
-    root.geometry("980x730")
-    root.minsize(900, 640)
-    root.configure(fg_color=P["bg"])
-    _ico = _app_dir() / "icon.ico"
-    if _ico.is_file():
-        try:
-            root.iconbitmap(str(_ico))
-        except Exception:
-            pass
+    import threading
+    from PIL import Image
+    from fluent_shell import FluentShell
 
     OUT_DIR = _app_dir() / "output"
     PREVIEW_MAX = (640, 360)
     _preview_path = os.path.join(tempfile.gettempdir(), "_livephoto_preview.jpg")
+    PAGES = [("videos", "视频素材", "添加并预览视频, 拖拽框选裁剪区域"),
+             ("edit", "画面调整", "时间截取 / 空间裁剪 / 特效"),
+             ("output", "输出设置", "输出选项与批量转换")]
 
-    state = {"items": list(items_carry or []), "sel": -1, "info": None, "preview_img": None,
-             "tk_img": None, "scale": 1.0, "crop_rect": None, "rect_id": None,
-             "drag": None, "running": False, "cover_t": None, "page": "videos"}
+    state = {"items": list(items_carry or []), "sel": -1, "info": None,
+             "preview_img": None, "tk_img": None, "scale": 1.0,
+             "crop_rect": None, "rect_id": None, "drag": None,
+             "running": False, "cover_t": None}
 
-    import queue as _queue
-    _logq = _queue.Queue()
+    _ico = _app_dir() / "icon.ico"
 
-    # ============================ 布局骨架 ============================
-    root.grid_columnconfigure(1, weight=1)
-    root.grid_rowconfigure(0, weight=1)
+    def build(app):
+        # ============================ 页面 1: 视频素材 ============================
+        pv = app.page("videos")
 
-    # ---------- 左侧导航栏 ----------
-    nav = ctk.CTkFrame(root, width=236, corner_radius=0, fg_color=P["bg"])
-    nav.grid(row=0, column=0, sticky="nsw")
-    nav.grid_propagate(False)
+        c_list = app.card(pv, "素材列表")
+        c_list.pack(fill="x", pady=6)
+        listbox = app.listbox(c_list, height=6, on_select=lambda lb: _on_list(lb))
+        listbox.pack(fill="x", padx=20, pady=(4, 2))
+        empty_hint = app.sublabel(c_list, "尚未添加视频 — 点击「添加视频」开始")
 
-    ctk.CTkLabel(nav, text="📀", font=ctk.CTkFont(size=26) if ctk else None,
-                 height=52).pack(anchor="w", padx=24, pady=(24, 0))
-    ctk.CTkLabel(nav, text="LivePhoto", font=ctk.CTkFont(family="Segoe UI Variable Display",
-                 size=17, weight="bold"), text_color=P["text"]).pack(anchor="w", padx=24)
-    ctk.CTkLabel(nav, text="视频 → 实况图", font=F_SMALL, text_color=P["sub"]).pack(
-        anchor="w", padx=24, pady=(2, 18))
+        row_btn = app.hbox(c_list)
+        row_btn.pack(fill="x", padx=20, pady=(6, 4))
+        app.btn(row_btn, "＋ 添加视频", _add_files, primary=True).pack(side="left")
+        app.btn(row_btn, "＋ 添加文件夹", _add_folder).pack(side="left", padx=8)
+        app.btn(row_btn, "－ 移除选中", _remove).pack(side="left")
+        lbl_info = app.label(c_list, "", role="sub", font=app.f_small)
+        lbl_info.pack(fill="x", padx=20, pady=(0, 14))
 
-    PAGES = [
-        ("videos", "视频素材", "添加并预览视频, 拖拽框选裁剪区域"),
-        ("edit", "画面调整", "时间截取 / 空间裁剪 / 特效"),
-        ("output", "输出设置", "输出选项与批量转换"),
-    ]
-    nav_btns = {}
+        # --- 预览 ---
+        c_prev = app.card(pv, "预览")
+        c_prev.pack(fill="both", expand=True, pady=6)
+        canvas = tk.Canvas(c_prev, bg=app.P["canvas"], relief="flat", bd=0,
+                           highlightthickness=0, height=200)
+        canvas.pack(padx=20, pady=(4, 8))
+        app.track(canvas, fg=None, bg="canvas")
+        lbl_preview = app.sublabel(c_prev, "选中视频后在此显示首帧 — 按住拖拽框选裁剪")
 
-    def _style_nav(active=None):
-        for key, label, _sub in PAGES:
-            b = nav_btns[key]
-            if key == active:
-                b.configure(fg_color=P["sel"], text_color=P["text"])
-            else:
-                b.configure(fg_color="transparent", text_color=P["sub"])
+        scrub_row = app.hbox(c_prev)
+        scrub_row.pack(fill="x", padx=20, pady=(0, 4))
+        app.label(scrub_row, "预览时间", role="sub").pack(side="left")
+        lbl_scrub = app.label(scrub_row, "0.00s", role="text")
+        lbl_scrub.pack(side="right")
+        _scrub_after = {"id": None}
 
-    for key, label, _sub in PAGES:
-        b = ctk.CTkButton(nav, text="  " + label, font=F_NAV, anchor="w", height=38,
-                          corner_radius=6, fg_color="transparent", text_color=P["sub"],
-                          hover_color=P["hover"],
-                          command=lambda k=key: _show_page(k, anim=True))
-        b.pack(fill="x", padx=12, pady=2)
-        nav_btns[key] = b
+        def _scrub_cmd(_v):
+            lbl_scrub.configure(text=f"{float(scl_scrub.get()):.2f}s")
+            if _scrub_after["id"]:
+                app.root.after_cancel(_scrub_after["id"])
+            _scrub_after["id"] = app.root.after(240, _on_scrub)
 
-    # 底部: 主题切换 + 版本
-    ctk.CTkLabel(nav, text="─" * 14, text_color=P["border"]).pack(fill="x", padx=18, pady=(18, 6))
-    sw_theme = ctk.CTkSwitch(nav, text="浅色模式", font=F_SMALL, progress_color=P["accent"],
-                             text_color=P["sub"], button_color=P["card2"],
-                             command=lambda: _toggle_theme())
-    sw_theme.pack(anchor="w", padx=24)
-    ctk.CTkLabel(nav, text=f"v{VERSION}", font=F_SMALL, text_color=P["sub"]).pack(
-        anchor="w", padx=24, pady=(10, 18))
+        scl_scrub = app.slider(scrub_row, 0, 10, command=_scrub_cmd)
+        scl_scrub.pack(side="left", fill="x", expand=True, padx=12)
 
-    def _toggle_theme():
-        items = list(state["items"])
-        newmode = "light" if mode == "dark" else "dark"
-        root.destroy()
-        return launch_fluent(items_carry=items, mode=newmode)
+        cover_row = app.hbox(c_prev)
+        cover_row.pack(fill="x", padx=20, pady=(0, 14))
+        app.btn(cover_row, "设当前帧为封面", _set_cover).pack(side="left")
+        lbl_cover = app.label(cover_row, "封面帧: 未指定 (默认取截取段中间)",
+                              role="sub", font=app.f_small)
+        lbl_cover.pack(side="left", padx=12)
 
-    # ---------- 右侧内容区 ----------
-    content = ctk.CTkFrame(root, corner_radius=0, fg_color=P["bg"])
-    content.grid(row=0, column=1, sticky="nsew")
-    content.grid_rowconfigure(2, weight=1)
-    content.grid_columnconfigure(0, weight=1)
+        # ============================ 页面 2: 画面调整 ============================
+        pe = app.page("edit")
 
-    lbl_ptitle = ctk.CTkLabel(content, text="视频素材", font=F_TITLE, text_color=P["text"],
-                              anchor="w")
-    lbl_ptitle.grid(row=0, column=0, sticky="ew", padx=36, pady=(26, 0))
-    lbl_psub = ctk.CTkLabel(content, text="", font=F_BODY, text_color=P["sub"], anchor="w")
-    lbl_psub.grid(row=1, column=0, sticky="ew", padx=36, pady=(2, 10))
+        c_time = app.card(pe, "时间截取")
+        c_time.pack(fill="x", pady=6)
+        var_start = tk.DoubleVar(value=0.0)
+        var_dur = tk.DoubleVar(value=3.0)
 
-    page_host = ctk.CTkFrame(content, corner_radius=0, fg_color=P["bg"])
-    page_host.grid(row=2, column=0, sticky="nsew", padx=24)
+        def _upd_time(*_):
+            d = (state["info"]["duration"] if state["info"] else 30) or 30
+            st = var_start.get()
+            du = max(0.5, min(5.0, var_dur.get()))
+            if st + du > d:
+                st = max(0.0, d - du)
+                var_start.set(round(st, 2))
+            lbl_start.configure(text=f"{var_start.get():.2f} s")
+            lbl_dur.configure(text=f"{du:.1f} s")
+            lbl_end.configure(text=f"结束 ≈ {var_start.get() + du:.2f} s")
 
-    # ============================ 通用控件 ============================
-    def card(parent, title=None):
-        f = ctk.CTkFrame(parent, fg_color=P["card"], corner_radius=8)
-        if title:
-            ctk.CTkLabel(f, text=title, font=F_H2, text_color=P["text"], anchor="w").pack(
-                fill="x", padx=20, pady=(14, 6))
-        return f
+        def _time_row(label, var, frm, to):
+            r = app.row(c_time, label)
+            lbl = app.label(r, "", role="text")
+            lbl.pack(side="right")
+            app.slider(r, frm, to, variable=var,
+                       command=lambda _v: _upd_time()).pack(
+                side="right", fill="x", expand=True, padx=12)
+            return lbl
 
-    def sublabel(parent, text):
-        return ctk.CTkLabel(parent, text=text, font=F_SMALL, text_color=P["sub"], anchor="w")
+        lbl_start = _time_row("起点", var_start, 0, 30)
+        lbl_dur = _time_row("时长", var_dur, 0.5, 5)
+        lbl_end = app.sublabel(c_time, "结束 ≈ 3.00 s")
 
-    def toast(text, ok=True):
-        """右下角浮动通知卡片: 滑入 + 停留 + 滑出 (Win11 Toast 风)。"""
-        t = ctk.CTkFrame(root, fg_color=P["card"], corner_radius=8, border_width=1,
-                         border_color=P["accent"] if ok else "#e74c3c", width=340, height=52)
-        ctk.CTkLabel(t, text=("✔  " if ok else "✖  ") + text, font=F_BODY,
-                     text_color=P["text"], wraplength=300, justify="left").pack(
-            padx=16, pady=12, fill="x")
-        t.place(relx=1.0, rely=1.0, x=-24, y=70, anchor="se")
+        # --- 空间裁剪 ---
+        c_crop = app.card(pe, "空间裁剪")
+        c_crop.pack(fill="x", pady=6)
+        app.sublabel(c_crop, "在「视频素材」页拖拽框选, 会自动切到自定义")
+        var_crop_seg = tk.StringVar(value="不裁剪")
+        app.segmented(c_crop, ["不裁剪", "正方形", "9:16", "自定义"],
+                      var_crop_seg, command=lambda _v: _toggle_crop()).pack(
+            fill="x", padx=20, pady=4)
 
-        def _in_(i=0):
-            if i > 10:
-                root.after(2800, lambda: _out())
-                return
-            t.place(y=int(70 - 64 * (i / 10)))
-            root.after(12, lambda: _in_(i + 1))
+        frm_custom = app.hbox(c_crop)
+        frm_custom.pack(fill="x", padx=20, pady=(6, 14))
+        var_cx, var_cy, var_cw, var_ch = (tk.IntVar(), tk.IntVar(),
+                                          tk.IntVar(), tk.IntVar())
+        _c_entries = []
+        for lab, vv in (("X", var_cx), ("Y", var_cy), ("宽", var_cw), ("高", var_ch)):
+            app.label(frm_custom, lab, role="sub").pack(side="left", padx=(0, 4))
+            e = app.entry(frm_custom, width=70, justify="center")
+            e.configure(textvariable=vv)
+            e.pack(side="left", padx=(0, 12))
+            _c_entries.append(e)
 
-        def _out(i=0):
-            if i > 10:
-                t.destroy()
-                return
-            t.place(y=int(6 + 64 * (i / 10)))
-            root.after(12, lambda: _out(i + 1))
+        def _toggle_crop():
+            on = var_crop_seg.get() == "自定义"
+            for e in _c_entries:
+                e.configure(state="normal" if on else "disabled")
 
-        _in_()
+        # --- 效果 ---
+        c_fx = app.card(pe, "效果")
+        c_fx.pack(fill="x", pady=6)
+        fx_row = app.hbox(c_fx)
+        fx_row.pack(fill="x", padx=20, pady=6)
+        var_speed = tk.StringVar(value="1.0x")
+        var_rotate = tk.StringVar(value="0°")
+        var_q = tk.StringVar(value="标准")
 
-    # ============================ 页面 1: 视频素材 ============================
-    page_videos = ctk.CTkScrollableFrame(page_host, fg_color=P["bg"], corner_radius=0)
-    PAGES_FRAME = {"videos": page_videos}
+        def _opt(label, var, values, width=92):
+            app.label(fx_row, label, role="sub").pack(side="left")
+            app.optionmenu(fx_row, values, var, width=width).pack(
+                side="left", padx=(4, 20))
 
-    # --- 素材列表卡片 ---
-    c_list = card(page_videos, "素材列表")
-    c_list.pack(fill="x", pady=6)
-    listbox = ctk.CTkScrollableFrame(c_list, height=104, fg_color=P["entry"],
-                                     corner_radius=6)
-    listbox.pack(fill="x", padx=20, pady=4)
-    empty_hint = sublabel(c_list, "尚未添加视频 — 点击「添加视频」或「添加文件夹」开始")
-    empty_hint.pack(fill="x", padx=20, pady=4)
+        _opt("速度", var_speed, ["0.5x", "0.75x", "1.0x", "1.5x", "2.0x"])
+        _opt("旋转", var_rotate, ["0°", "90°", "180°", "270°"], 76)
+        _opt("画质", var_q, ["高", "标准", "小体积"], 88)
 
-    row_btn = ctk.CTkFrame(c_list, fg_color="transparent")
-    row_btn.pack(fill="x", padx=20, pady=(6, 14))
+        fx_row2 = app.hbox(c_fx)
+        fx_row2.pack(fill="x", padx=20, pady=(6, 4))
+        var_mute = tk.BooleanVar(value=False)
+        var_rev = tk.BooleanVar(value=False)
+        app.toggle(fx_row2, "静音", var_mute).pack(side="left", padx=(0, 28))
+        app.toggle(fx_row2, "倒放", var_rev).pack(side="left")
+        app.sublabel(c_fx, "变速以输出时长为准 (0.5x 慢放取源片约 2 倍长度)")
 
-    def _btn(parent, text, cmd, primary=False):
-        return ctk.CTkButton(parent, text=text, command=cmd, font=F_BODY, height=34,
-                             corner_radius=6, width=132,
-                             fg_color=P["accent"] if primary else P["card2"],
-                             text_color=P["accent_t"] if primary else P["text"],
-                             hover_color=P["accent_h"] if primary else P["hover"])
+        # ============================ 页面 3: 输出设置 ============================
+        po = app.page("output")
+        c_opt = app.card(po, "输出选项")
+        c_opt.pack(fill="x", pady=6)
+        var_livp = tk.BooleanVar(value=False)
+        var_lossless = tk.BooleanVar(value=False)
+        var_open = tk.BooleanVar(value=True)
+        app.switch_row(c_opt, "打包成 .livp", "把 JPG+MOV 合成单个文件", var_livp)
+        app.switch_row(c_opt, "无损模式",
+                       "不重编码(需不裁剪/不变速/不旋转且全长 0.5~5s)", var_lossless)
+        app.switch_row(c_opt, "完成后打开输出文件夹", "转换结束自动打开", var_open)
+        app.sublabel(c_opt, f"输出目录: {OUT_DIR}  ·  每个视频生成 NAME.JPG + NAME.MOV")
+        app.sublabel(c_opt, "批量时裁剪/时间/封面对所有视频统一生效")
 
-    _btn(row_btn, "＋ 添加视频", lambda: _add_files(), primary=True).pack(side="left")
-    _btn(row_btn, "＋ 添加文件夹", lambda: _add_folder()).pack(side="left", padx=8)
-    _btn(row_btn, "－ 移除选中", lambda: _remove()).pack(side="left")
-    lbl_info = sublabel(c_list, "")
-    lbl_info.pack(fill="x", padx=20, pady=(0, 12))
+        c_run = app.card(po, "转换")
+        c_run.pack(fill="both", expand=True, pady=6)
+        run_row = app.hbox(c_run)
+        run_row.pack(fill="x", padx=20, pady=(10, 4))
+        btn_start = app.btn(run_row, "开始转换", _start, primary=True, width=170)
+        btn_start.pack(side="left")
+        lbl_status = app.label(run_row, "就绪", role="sub")
+        lbl_status.pack(side="left", padx=16)
+        pg = app.progress(c_run)
+        pg.pack(fill="x", padx=20, pady=8)
+        pg.set(0)
+        txt_log = app.logbox(c_run, height=200)
 
-    _item_btns = []
+        # 把常用引用塞进 state, 供嵌套函数使用
+        state.update({"listbox": listbox, "canvas": canvas, "lbl_info": lbl_info,
+                      "lbl_preview": lbl_preview, "lbl_scrub": lbl_scrub,
+                      "scl_scrub": scl_scrub, "lbl_cover": lbl_cover,
+                      "var_start": var_start, "var_dur": var_dur,
+                      "var_crop_seg": var_crop_seg,
+                      "var_cx": var_cx, "var_cy": var_cy,
+                      "var_cw": var_cw, "var_ch": var_ch,
+                      "var_speed": var_speed, "var_rotate": var_rotate,
+                      "var_q": var_q, "var_mute": var_mute, "var_rev": var_rev,
+                      "var_livp": var_livp, "var_lossless": var_lossless,
+                      "var_open": var_open, "btn_start": btn_start,
+                      "lbl_status": lbl_status, "pg": pg, "txt_log": txt_log})
 
+        _refresh_list()
+        _toggle_crop()
+        _upd_time()
+
+    # ============================ 列表 / 预览 ============================
     def _refresh_list():
-        for w in listbox.winfo_children():
-            w.destroy()
-        _item_btns.clear()
-        if not state["items"]:
-            empty_hint.configure(text="尚未添加视频 — 点击「添加视频」或「添加文件夹」开始")
-            empty_hint.pack(fill="x", padx=20, pady=4)
-        else:
-            empty_hint.pack_forget()
-            for i, p in enumerate(state["items"]):
-                b = ctk.CTkButton(listbox, text=f"{i+1:>2}.  {os.path.basename(p)}",
-                                  font=F_BODY, anchor="w", height=30, corner_radius=4,
-                                  fg_color=P["sel"] if i == state["sel"] else "transparent",
-                                  text_color=P["text"], hover_color=P["hover"],
-                                  command=lambda idx=i: _select(idx))
-                b.pack(fill="x", pady=1)
-                _item_btns.append(b)
+        lb = state["listbox"]
+        lb.delete(0, "end")
+        for i, p in enumerate(state["items"]):
+            lb.insert("end", f"  {i+1:>2}.  {os.path.basename(p)}")
+        if 0 <= state["sel"] < len(state["items"]):
+            lb.selection_set(state["sel"])
+            lb.see(state["sel"])
+
+    def _on_list(lb):
+        cur = lb.curselection()
+        if cur:
+            _select(cur[0])
 
     def _add_files():
         paths = filedialog.askopenfilenames(
             title="选择视频文件",
-            filetypes=[("视频", "*.mp4 *.mov *.mkv *.avi *.webm *.flv *.wmv *.m4v"), ("全部", "*.*")])
+            filetypes=[("视频", "*.mp4 *.mov *.mkv *.avi *.webm *.flv *.wmv *.m4v"),
+                       ("全部", "*.*")])
         for p in paths:
             if p not in state["items"]:
                 state["items"].append(p)
@@ -1515,68 +1524,36 @@ def launch_fluent(items_carry=None, mode="dark"):
         try:
             info = probe_video(path)
         except Exception as e:
-            lbl_info.configure(text=f"读取失败: {e}")
+            state["lbl_info"].configure(text=f"读取失败: {e}")
             state["info"] = None
             _refresh_list()
             return
         state["info"] = info
         d = info["duration"] or 0
-        lbl_info.configure(
+        state["lbl_info"].configure(
             text=f"{info['width']}×{info['height']}   ·   {d:.2f} 秒   ·   "
                  f"{info['fps'] or '?'} fps")
         _refresh_list()
         if d:
-            scl_start.configure(to=max(0.1, d - 0.5))
-            var_dur.set(min(3.0, max(0.5, d)))
-            scl_scrub.configure(to=max(0.1, d))
+            state["scl_scrub"].configure(to=max(0.1, d))
+            state["var_dur"].set(min(3.0, max(0.5, d)))
         _show_preview(path)
-
-    # --- 预览卡片 ---
-    c_prev = card(page_videos, "预览")
-    c_prev.pack(fill="both", expand=True, pady=6)
-    canvas = tk.Canvas(c_prev, bg=P["canvas"], relief="flat", bd=0, highlightthickness=0)
-    canvas.pack(padx=20, pady=(4, 8))
-    lbl_preview = sublabel(c_prev, "选中视频后在此显示首帧 — 按住鼠标拖拽框选裁剪区域")
-    lbl_preview.pack(fill="x", padx=20, pady=(0, 4))
-
-    scrub_row = ctk.CTkFrame(c_prev, fg_color="transparent")
-    scrub_row.pack(fill="x", padx=20, pady=(0, 4))
-    ctk.CTkLabel(scrub_row, text="预览时间", font=F_BODY, text_color=P["sub"]).pack(side="left")
-    lbl_scrub = ctk.CTkLabel(scrub_row, text="0.00s", font=F_BODY, text_color=P["text"], width=64)
-    lbl_scrub.pack(side="right")
-    _scrub_after = {"id": None}
-
-    def _scrub_cmd(v):
-        lbl_scrub.configure(text=f"{float(v):.2f}s")
-        # 防抖: 停止拖动 240ms 后才抽帧(拖动过程只刷新文字)
-        if _scrub_after["id"]:
-            root.after_cancel(_scrub_after["id"])
-        _scrub_after["id"] = root.after(240, _on_scrub)
-
-    scl_scrub = ctk.CTkSlider(scrub_row, from_=0, to=10, height=22,
-                              progress_color=P["accent"], button_color=P["accent"],
-                              button_hover_color=P["accent_h"], command=_scrub_cmd)
-    scl_scrub.pack(side="left", fill="x", expand=True, padx=12)
-
-    cover_row = ctk.CTkFrame(c_prev, fg_color="transparent")
-    cover_row.pack(fill="x", padx=20, pady=(0, 14))
-    _btn(cover_row, "设当前帧为封面", lambda: _set_cover()).pack(side="left")
-    lbl_cover = sublabel(cover_row, "封面帧: 未指定 (默认取截取段中间)")
-    lbl_cover.pack(side="left", padx=12)
 
     def _load_frame(path, t):
         try:
             extract_cover(path, _preview_path, t, log_fn=lambda *a: None)
             im = Image.open(_preview_path).convert("RGB")
         except Exception as e:
-            lbl_preview.configure(text=f"预览失败: {e}")
+            state["lbl_preview"].configure(text=f"预览失败: {e}")
             return None
         state["preview_img"] = im
         ow, oh = im.size
         scale = min(PREVIEW_MAX[0] / ow, PREVIEW_MAX[1] / oh, 1.0)
         state["scale"] = scale
         disp = im.resize((max(1, int(ow * scale)), max(1, int(oh * scale))))
+        from PIL import ImageTk
         state["tk_img"] = ImageTk.PhotoImage(disp)
+        canvas = state["canvas"]
         canvas.configure(width=disp.width, height=disp.height)
         canvas.delete("all")
         canvas.create_image(0, 0, image=state["tk_img"], anchor="nw")
@@ -1585,44 +1562,47 @@ def launch_fluent(items_carry=None, mode="dark"):
             r = state["crop_rect"]
             state["rect_id"] = canvas.create_rectangle(
                 r[0] * scale, r[1] * scale, r[2] * scale, r[3] * scale,
-                outline=P["accent"], width=2)
+                outline=app.P["accent"], width=2)
         return im
 
     def _show_preview(path):
         state["crop_rect"] = None
         state["cover_t"] = None
         d = state["info"]["duration"] if state["info"] else 10
-        scl_scrub.set(0)
-        scl_scrub.configure(to=max(0.1, d or 10))
-        lbl_scrub.configure(text="0.00s")
-        lbl_cover.configure(text="封面帧: 未指定 (默认取截取段中间)")
+        state["scl_scrub"].set(0)
+        state["scl_scrub"].configure(to=max(0.1, d or 10))
+        state["lbl_scrub"].configure(text="0.00s")
+        state["lbl_cover"].configure(text="封面帧: 未指定 (默认取截取段中间)")
         im = _load_frame(path, 0.0)
         if im is None:
             return
-        lbl_preview.configure(
+        state["lbl_preview"].configure(
             text=f"{im.width}×{im.height}  ·  拖拽框选裁剪 / 拖时间轴换帧")
 
     def _on_scrub():
-        t = float(scl_scrub.get())
-        lbl_scrub.configure(text=f"{t:.2f}s")
+        t = float(state["scl_scrub"].get())
+        state["lbl_scrub"].configure(text=f"{t:.2f}s")
         if state["sel"] >= 0 and state["items"]:
             _load_frame(state["items"][state["sel"]], t)
 
     def _set_cover():
-        t = round(float(scl_scrub.get()), 3)
+        t = round(float(state["scl_scrub"].get()), 3)
         state["cover_t"] = t
-        lbl_cover.configure(text=f"封面帧: t = {t:.2f}s (当前预览时间轴)")
+        state["lbl_cover"].configure(text=f"封面帧: t = {t:.2f}s (当前时间轴)")
 
+    # ---- 裁剪拖拽 ----
     def _down(e):
+        canvas = state["canvas"]
         if state["rect_id"]:
             canvas.delete(state["rect_id"])
         state["drag"] = (e.x, e.y)
-        state["rect_id"] = canvas.create_rectangle(e.x, e.y, e.x, e.y,
-                                                   outline=P["accent"], width=2)
+        state["rect_id"] = canvas.create_rectangle(
+            e.x, e.y, e.x, e.y, outline=app.P["accent"], width=2)
 
     def _move(e):
         if state["drag"] and state["rect_id"]:
-            canvas.coords(state["rect_id"], state["drag"][0], state["drag"][1], e.x, e.y)
+            state["canvas"].coords(state["rect_id"], state["drag"][0],
+                                   state["drag"][1], e.x, e.y)
 
     def _up(e):
         if not state["drag"]:
@@ -1639,256 +1619,28 @@ def launch_fluent(items_carry=None, mode="dark"):
         ox0, oy0 = max(0, ox0), max(0, oy0)
         ox1, oy1 = min(im.width, ox1), min(im.height, oy1)
         if ox1 - ox0 < 10 or oy1 - oy0 < 10:
-            lbl_preview.configure(text="框选太小已忽略 — 在画面上按住左键拖拽")
+            state["lbl_preview"].configure(text="框选太小已忽略 — 按住左键拖拽")
             return
         state["crop_rect"] = (ox0, oy0, ox1, oy1)
-        var_crop_seg.set("自定义")
-        _toggle_crop()
-        var_cx.set(ox0); var_cy.set(oy0)
-        var_cw.set(ox1 - ox0); var_ch.set(oy1 - oy0)
-        lbl_preview.configure(
-            text=f"框选裁剪: {ox1-ox0}×{oy1-oy0} @ ({ox0},{oy0}) — 已切换到自定义裁剪")
+        state["var_crop_seg"].set("自定义")
+        state["var_cx"].set(ox0)
+        state["var_cy"].set(oy0)
+        state["var_cw"].set(ox1 - ox0)
+        state["var_ch"].set(oy1 - oy0)
+        state["lbl_preview"].configure(
+            text=f"框选裁剪: {ox1-ox0}×{oy1-oy0} @ ({ox0},{oy0}) — 已切换到自定义")
 
-    canvas.bind("<Button-1>", _down)
-    canvas.bind("<B1-Motion>", _move)
-    canvas.bind("<ButtonRelease-1>", _up)
-
-    # ============================ 页面 2: 画面调整 ============================
-    page_edit = ctk.CTkScrollableFrame(page_host, fg_color=P["bg"], corner_radius=0)
-    PAGES_FRAME["edit"] = page_edit
-
-    # --- 时间截取 ---
-    c_time = card(page_edit, "时间截取")
-    c_time.pack(fill="x", pady=6)
-
-    def _slider_row(parent, label, var, from_, to, cmd=None, steps=None):
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=20, pady=6)
-        ctk.CTkLabel(row, text=label, font=F_BODY, text_color=P["sub"], width=56).pack(side="left")
-        s = ctk.CTkSlider(row, from_=from_, to=to, variable=var, height=22,
-                          progress_color=P["accent"], button_color=P["accent"],
-                          button_hover_color=P["accent_h"],
-                          number_of_steps=steps, command=cmd)
-        s.pack(side="left", fill="x", expand=True, padx=12)
-        return row, s
-
-    var_start = tk.DoubleVar(value=0.0)
-    var_dur = tk.DoubleVar(value=3.0)
-    lbl_start = None
-    lbl_dur = None
-
-    def _upd_time(*_):
-        d = (state["info"]["duration"] if state["info"] else 30) or 30
-        st = var_start.get()
-        du = max(0.5, min(5.0, var_dur.get()))
-        if st + du > d:
-            st = max(0.0, d - du)
-            var_start.set(round(st, 2))
-        if lbl_start:
-            lbl_start.configure(text=f"{var_start.get():.2f} s")
-            lbl_dur.configure(text=f"{du:.1f} s")
-            lbl_end.configure(text=f"结束 ≈ {var_start.get() + du:.2f} s")
-
-    row, scl_start = _slider_row(c_time, "起点", var_start, 0, 30, lambda _v: _upd_time(), steps=600)
-    lbl_start = ctk.CTkLabel(row, text="0.00 s", font=F_BODY, text_color=P["text"], width=64)
-    lbl_start.pack(side="right")
-    row, scl_dur = _slider_row(c_time, "时长", var_dur, 0.5, 5, lambda _v: _upd_time(), steps=45)
-    lbl_dur = ctk.CTkLabel(row, text="3.0 s", font=F_BODY, text_color=P["text"], width=64)
-    lbl_dur.pack(side="right")
-    lbl_end = sublabel(c_time, "结束 ≈ 3.00 s")
-    lbl_end.pack(fill="x", padx=20, pady=(0, 14))
-
-    # --- 空间裁剪 ---
-    c_crop = card(page_edit, "空间裁剪")
-    c_crop.pack(fill="x", pady=6)
-    sublabel(c_crop, "在「视频素材」页的预览画面上拖拽框选, 会自动切到自定义").pack(
-        fill="x", padx=20, pady=(0, 6))
-    var_crop_seg = ctk.StringVar(value="不裁剪")
-    seg = ctk.CTkSegmentedButton(c_crop, values=["不裁剪", "正方形", "9:16", "自定义"],
-                                 variable=var_crop_seg, font=F_BODY, height=34,
-                                 selected_color=P["accent"], selected_hover_color=P["accent_h"],
-                                 unselected_color=P["card2"], unselected_hover_color=P["hover"],
-                                 command=lambda _v: _toggle_crop())
-    seg.pack(fill="x", padx=20, pady=4)
-
-    frm_custom = ctk.CTkFrame(c_crop, fg_color="transparent")
-    frm_custom.pack(fill="x", padx=20, pady=(6, 14))
-    var_cx, var_cy, var_cw, var_ch = (tk.IntVar(), tk.IntVar(), tk.IntVar(), tk.IntVar())
-    _c_entries = []
-    for i, (lab, vv) in enumerate([("X", var_cx), ("Y", var_cy), ("宽", var_cw), ("高", var_ch)]):
-        ctk.CTkLabel(frm_custom, text=lab, font=F_BODY, text_color=P["sub"]).grid(
-            row=0, column=i * 2, padx=(0, 4))
-        e = ctk.CTkEntry(frm_custom, textvariable=vv, width=70, height=30, font=F_BODY,
-                         fg_color=P["entry"], border_color=P["border"],
-                         text_color=P["text"], justify="center")
-        e.grid(row=0, column=i * 2 + 1, padx=(0, 12))
-        _c_entries.append(e)
-
-    def _toggle_crop():
-        on = var_crop_seg.get() == "自定义"
-        for e in _c_entries:
-            e.configure(state="normal" if on else "disabled")
-
-    # --- 效果 ---
-    c_fx = card(page_edit, "效果")
-    c_fx.pack(fill="x", pady=6)
-
-    fx_row = ctk.CTkFrame(c_fx, fg_color="transparent")
-    fx_row.pack(fill="x", padx=20, pady=6)
-    var_speed = tk.StringVar(value="1.0x")
-    var_rotate = tk.StringVar(value="0°")
-    var_q = tk.StringVar(value="标准")
-
-    def _optmenu(parent, label, var, values, width=92):
-        ctk.CTkLabel(parent, text=label, font=F_BODY, text_color=P["sub"]).pack(side="left")
-        m = ctk.CTkOptionMenu(parent, variable=var, values=values, width=width, height=32,
-                              font=F_BODY, fg_color=P["card2"],
-                              button_color=P["hover"], button_hover_color=P["sel"],
-                              text_color=P["text"], anchor="center")
-        m.pack(side="left", padx=(4, 20))
-        return m
-
-    _optmenu(fx_row, "速度", var_speed, ["0.5x", "0.75x", "1.0x", "1.5x", "2.0x"])
-    _optmenu(fx_row, "旋转", var_rotate, ["0°", "90°", "180°", "270°"], 76)
-    _optmenu(fx_row, "画质", var_q, ["高", "标准", "小体积"], 88)
-
-    fx_row2 = ctk.CTkFrame(c_fx, fg_color="transparent")
-    fx_row2.pack(fill="x", padx=20, pady=(6, 4))
-    var_mute = tk.BooleanVar(value=False)
-    var_rev = tk.BooleanVar(value=False)
-
-    def _switch(parent, text, var):
-        return ctk.CTkSwitch(parent, text=text, variable=var, font=F_BODY,
-                             text_color=P["text"], progress_color=P["accent"],
-                             button_color=P["card2"], button_hover_color=P["hover"])
-
-    _switch(fx_row2, "静音", var_mute).pack(side="left", padx=(0, 28))
-    _switch(fx_row2, "倒放", var_rev).pack(side="left")
-    sublabel(c_fx, "变速以输出时长为准 (0.5x 慢放会取源片约 2 倍长度的素材)").pack(
-        fill="x", padx=20, pady=(4, 14))
-
-    # ============================ 页面 3: 输出设置 ============================
-    page_out = ctk.CTkScrollableFrame(page_host, fg_color=P["bg"], corner_radius=0)
-    PAGES_FRAME["output"] = page_out
-
-    # --- 输出选项 ---
-    c_opt = card(page_out, "输出选项")
-    c_opt.pack(fill="x", pady=6)
-    var_livp = tk.BooleanVar(value=False)
-    var_lossless = tk.BooleanVar(value=False)
-    var_open = tk.BooleanVar(value=True)
-
-    def _switch_row(parent, text, var, desc):
-        r = ctk.CTkFrame(parent, fg_color="transparent")
-        r.pack(fill="x", padx=20, pady=7)
-        box = ctk.CTkFrame(r, fg_color="transparent")
-        box.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(box, text=text, font=F_BODY, text_color=P["text"], anchor="w").pack(fill="x")
-        sublabel(box, desc).pack(fill="x")
-        _switch(r, "", var).pack(side="right")
-
-    _switch_row(c_opt, "打包成 .livp", var_livp, "把 JPG+MOV 合成单个文件, 方便分享")
-    _switch_row(c_opt, "无损模式", var_lossless,
-                "不重编码 (需不裁剪/不变速/不旋转且全长 0.5~5s, 否则自动回退)")
-    _switch_row(c_opt, "完成后打开输出文件夹", var_open, "转换结束后自动在资源管理器中打开")
-    sublabel(c_opt, f"输出目录: {OUT_DIR}  ·  每个视频生成 NAME.JPG + NAME.MOV").pack(
-        fill="x", padx=20, pady=(4, 6))
-    sublabel(c_opt, "批量时裁剪/时间/封面设置对所有视频统一生效").pack(
-        fill="x", padx=20, pady=(0, 14))
-
-    # --- 转换 + 进度 + 日志 ---
-    c_run = card(page_out, "转换")
-    c_run.pack(fill="both", expand=True, pady=6)
-    run_row = ctk.CTkFrame(c_run, fg_color="transparent")
-    run_row.pack(fill="x", padx=20, pady=(10, 4))
-    btn_start = ctk.CTkButton(run_row, text="开始转换", font=ctk.CTkFont(
-        family="Segoe UI Variable Text", size=15, weight="bold"),
-        height=42, corner_radius=6, width=170,
-        fg_color=P["accent"], text_color=P["accent_t"], hover_color=P["accent_h"],
-        command=lambda: _start())
-    btn_start.pack(side="left")
-    lbl_status = sublabel(run_row, "就绪")
-    lbl_status.pack(side="left", padx=16)
-
-    pg = ctk.CTkProgressBar(c_run, height=8, corner_radius=4,
-                            fg_color=P["entry"], progress_color=P["accent"])
-    pg.pack(fill="x", padx=20, pady=8)
-    pg.set(0)
-
-    txt_log = ctk.CTkTextbox(c_run, height=210, font=F_MONO, wrap="word",
-                             fg_color=P["entry"], text_color=P["text"],
-                             border_color=P["border"], border_width=1, corner_radius=6)
-    txt_log.pack(fill="both", expand=True, padx=20, pady=(4, 16))
-    txt_log.configure(state="disabled")
-
-    def log(msg):
-        _logq.put(str(msg))
-
-    def ui(fn):
-        """线程安全 UI 更新: 后台线程入队, 主线程执行。"""
-        _logq.put(fn)
-
-    def _drain_log():
-        try:
-            while True:
-                msg = _logq.get_nowait()
-                try:
-                    if callable(msg):
-                        msg()
-                    else:
-                        txt_log.configure(state="normal")
-                        txt_log.insert("end", msg + "\n")
-                        txt_log.see("end")
-                        txt_log.configure(state="disabled")
-                except Exception:
-                    pass
-        except _queue.Empty:
-            pass
-        root.after(80, _drain_log)
-
-    # ============================ 页面切换动画 ============================
-    def _show_page(key, anim=True):
-        if key not in PAGES_FRAME or key == state["page"]:
-            return
-        old = PAGES_FRAME[state["page"]]
-        new = PAGES_FRAME[key]
-        state["page"] = key
-        for k, label, subtitle in PAGES:
-            if k == key:
-                lbl_ptitle.configure(text=label)
-                lbl_psub.configure(text=subtitle)
-        _style_nav(key)
-        if not anim:
-            for f in PAGES_FRAME.values():
-                f.place_forget()
-            new.place(x=0, y=0, relwidth=1, relheight=1)
-            return
-        n = 9
-
-        def step(i):
-            t = i / n
-            ease = 1 - (1 - t) ** 3
-            new.place(x=int((1 - ease) * 34), y=0, relwidth=1, relheight=1)
-            old.place(x=-int(ease * 34), y=0, relwidth=1, relheight=1)
-            new.lift()
-            if i < n:
-                page_host.after(14, lambda: step(i + 1))
-            else:
-                old.place_forget()
-                new.place(x=0, y=0, relwidth=1, relheight=1)
-        new.place(x=34, y=0, relwidth=1, relheight=1)
-        step(0)
-
+    # ============================ 转换 ============================
     def _resolve_crop():
         if state["crop_rect"]:
             r = state["crop_rect"]
             return "custom", (r[0], r[1], r[2] - r[0], r[3] - r[1])
-        if var_crop_seg.get() == "自定义":
-            return "custom", (var_cx.get(), var_cy.get(), var_cw.get(), var_ch.get())
+        if state["var_crop_seg"].get() == "自定义":
+            return "custom", (state["var_cx"].get(), state["var_cy"].get(),
+                              state["var_cw"].get(), state["var_ch"].get())
         return {"不裁剪": "none", "正方形": "square", "9:16": "portrait"}.get(
-            var_crop_seg.get(), "none"), None
+            state["var_crop_seg"].get(), "none"), None
 
-    # ============================ 转换 ============================
     def _start():
         if state["running"]:
             return
@@ -1896,24 +1648,30 @@ def launch_fluent(items_carry=None, mode="dark"):
             messagebox.showerror("LivePhoto", "请先在「视频素材」页添加至少一个视频")
             return
         crop_preset, crop_custom = _resolve_crop()
-        dur = max(0.5, min(5.0, float(var_dur.get())))
-        st = float(var_start.get())
+        dur = max(0.5, min(5.0, float(state["var_dur"].get())))
+        st = float(state["var_start"].get())
         try:
-            speed = float(var_speed.get().rstrip("x"))
+            speed = float(state["var_speed"].get().rstrip("x"))
         except ValueError:
             speed = 1.0
         try:
-            rotate = int(var_rotate.get().rstrip("°"))
+            rotate = int(state["var_rotate"].get().rstrip("°"))
         except ValueError:
             rotate = 0
-        crf = {"高": 16, "标准": 18, "小体积": 23}.get(var_q.get(), 18)
-        mute = var_mute.get()
-        reverse = var_rev.get()
-        lossless = var_lossless.get()
-        open_after = var_open.get()
+        crf = {"高": 16, "标准": 18, "小体积": 23}.get(state["var_q"].get(), 18)
+        mute = state["var_mute"].get()
+        reverse = state["var_rev"].get()
+        lossless = state["var_lossless"].get()
+        open_after = state["var_open"].get()
         cover_t = state.get("cover_t")
         items = list(state["items"])
-        do_livp = var_livp.get()
+        do_livp = state["var_livp"].get()
+
+        log = lambda m: app.log(m, state["txt_log"])
+        ui = app.ui
+        btn_start = state["btn_start"]
+        lbl_status = state["lbl_status"]
+        pg = state["pg"]
 
         def worker():
             state["running"] = True
@@ -1939,41 +1697,28 @@ def launch_fluent(items_carry=None, mode="dark"):
                 pg.set(1.0 if ok == len(items) else 0.3),
                 log(f"✅ 完成 {ok}/{len(items)} 个, 结果在 {OUT_DIR}"),
                 lbl_status.configure(text="完成"),
-                toast(f"完成 {ok}/{len(items)} 个视频 — 结果已输出到 output 文件夹",
-                      ok=(ok == len(items))),
+                app.toast(f"完成 {ok}/{len(items)} 个 — 已输出到 output 文件夹",
+                          ok=(ok == len(items))),
                 btn_start.configure(state="normal", text="开始转换")))
             state["running"] = False
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ============================ 启动 ============================
-    def _dwm_native():
-        """Win11 原生: 深色标题栏 + 标题栏颜色与窗口背景一致。"""
-        try:
-            import ctypes
-            dwm = ctypes.windll.dwmapi
-            hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
-            v = ctypes.c_int(1 if mode == "dark" else 0)
-            dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(v), 4)  # immersive dark
-            r, g, b = (int(P["bg"][i:i + 2], 16) for i in (1, 3, 5))
-            c = ctypes.c_uint((b << 16) | (g << 8) | r)
-            dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(c), 4)   # caption color
-            t = ctypes.c_uint(0x00000000 if mode == "dark" else 0x00FFFFFF)
-            dwm.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(t), 4)   # caption text
-        except Exception:
-            pass
+    # 所有嵌套函数都定义好了, 现在才创建窗口(builder 会在构造时立即调用 build)
+    app = FluentShell(title=f"LivePhoto 制作工具 v{VERSION}",
+                      app_name="LivePhoto", subtitle="视频 → 实况图",
+                      pages=PAGES, width=1060, height=760, mode=mode,
+                      icon=str(_ico) if _ico.is_file() else None,
+                      footer=f"v{VERSION}", builder=lambda a: build(a))
+    P = app.P
 
-    _style_nav("videos")
-    _refresh_list()
-    _toggle_crop()
-    _upd_time()
-    for f in PAGES_FRAME.values():
-        f.place_forget()
-    page_videos.place(x=0, y=0, relwidth=1, relheight=1)
-    root.update_idletasks()
-    _dwm_native()
-    root.after(80, _drain_log)
-    root.mainloop()
+    # 绑定裁剪拖拽(build 已在 FluentShell 初始化时执行, canvas 已存在)
+    c = state["canvas"]
+    c.bind("<Button-1>", _down)
+    c.bind("<B1-Motion>", _move)
+    c.bind("<ButtonRelease-1>", _up)
+
+    app.mainloop()
     return 0
 
 
@@ -2099,7 +1844,7 @@ def launch_gui_classic():
     # ---------- 2. 预览 / 拖拽框选裁剪 / 时间轴选帧 ----------
     frm_prev = ttk.LabelFrame(root, text="2. 预览 / 拖拽框选裁剪 / 时间轴选帧", padding=8)
     frm_prev.pack(fill="x", padx=10, pady=6)
-    canvas = tk.Canvas(frm_prev, bg="#111111", relief="flat", bd=0)
+    canvas = tk.Canvas(frm_prev, bg="#2b2b2b", relief="flat", bd=0)
     canvas.pack(padx=4, pady=4)
     lbl_preview = ttk.Label(frm_prev, text="先在上方添加视频并选中以加载预览", foreground="#888")
     lbl_preview.pack(anchor="w")
