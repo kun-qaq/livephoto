@@ -43,8 +43,6 @@ jobs:
 
           if (-not (Test-Path "dist\output\CI_SMOKE.MOV")) { throw "smoke test failed: no output file" }
 
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/LivePhotoMaker.exe
+      # 说明: 这里只做「能否打包 + 转换是否跑通」的质量门禁, 不自动上传发布物。
+      # 发布用的 exe 在本地打包(同一份 spec), GUI 与 CLI 都实测过再由发布脚本上传,
+      # 避免 CI 产物在未验证 GUI 的情况下覆盖 Release 资产。
