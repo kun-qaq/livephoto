@@ -105,6 +105,32 @@ def _run_ffmpeg(args, log_fn=print):
     return proc
 
 
+_FPS_ARGS_CACHE: dict = {}
+
+
+def _fps_args():
+    """恒定帧率参数, 兼容新旧 ffmpeg。
+
+    ffmpeg 8+ 已移除 -vsync(传了会报 "Error splitting the argument list: Option not found"),
+    须改用 -fps_mode cfr; 而 5.x 及更早只认 -vsync。这里探测一次并缓存。
+    """
+    exe = get_ffmpeg_exe()
+    if exe in _FPS_ARGS_CACHE:
+        return list(_FPS_ARGS_CACHE[exe])
+    args = ["-vsync", "cfr"]
+    try:
+        kw = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
+        p = subprocess.run([exe, "-hide_banner", "-h", "long"],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=20, **kw)
+        if "fps_mode" in (p.stdout or ""):
+            args = ["-fps_mode", "cfr"]
+    except Exception:
+        pass
+    _FPS_ARGS_CACHE[exe] = list(args)
+    return args
+
+
 def probe_video(path):
     """用 ffmpeg 读视频信息: 时长 / 分辨率 / 帧率 / 编码 / 有无音频。"""
     exe = get_ffmpeg_exe()
@@ -696,8 +722,8 @@ def preprocess(input_path, tmp_mp4, start, duration, crop, speed=1.0, rotate=0,
     if mute:
         args += ["-an"]
     args += ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(int(crf)),
-             "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-movflags", "+faststart",
-             "-vsync", "cfr", str(tmp_mp4)]
+             "-pix_fmt", "yuv420p", "-tag:v", "avc1", "-movflags", "+faststart"]
+    args += _fps_args() + [str(tmp_mp4)]
     _run_ffmpeg(args, log_fn)
     return tmp_mp4
 
