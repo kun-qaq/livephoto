@@ -3,6 +3,8 @@ name: Build & Release
 on:
   push:
     tags: ["v*"]
+  # 允许手动触发做打包/冒烟验证, 不产生 Release
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -19,27 +21,30 @@ jobs:
       - name: Install deps
         run: pip install pillow imageio-ffmpeg sv-ttk pywinstyles darkdetect pyinstaller
 
+      # 用仓库里的 LivePhotoMaker.spec 打包, 与本地发布版完全同一套参数,
+      # 避免命令行参数(如 --collect-data)漏掉 imageio_ffmpeg 的 ffmpeg 二进制。
       - name: Build exe
-        run: |
-          pyinstaller --noconfirm --onefile --noconsole --name LivePhotoMaker `
-            --icon icon.ico `
-            --collect-data imageio_ffmpeg `
-            --collect-all sv_ttk `
-            --exclude-module imageio `
-            --exclude-module numpy `
-            --exclude-module matplotlib `
-            livephoto.py
+        run: pyinstaller --noconfirm LivePhotoMaker.spec
 
       - name: Smoke test (CLI convert)
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           python -c "import imageio_ffmpeg,subprocess; subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),'-y','-f','lavfi','-i','testsrc=size=320x240:rate=15:duration=2','-c:v','libx264','-pix_fmt','yuv420p','t.mp4'], check=True)"
-          # 用 Python subprocess 启动 GUI-subsystem exe: 它会正确等待退出并逐项传参,
+
+          # GUI-subsystem exe 的 stdout 在 CI 里是 None, 用 LIVEPHOTO_LOG 落盘才能看到真实报错。
+          $env:LIVEPHOTO_LOG = "dist\smoke_log.txt"
+          # 用 Python subprocess 启动 GUI-subsystem exe: 正确等待退出并逐项传参,
           # 绕开 PowerShell Start-Process -ArgumentList 的 "Error splitting the argument list" 解析坑。
           python -c "import subprocess,sys; r=subprocess.run([r'.\dist\LivePhotoMaker.exe','t.mp4','-n','CI_SMOKE']); print('exe exit',r.returncode); sys.exit(r.returncode)"
+
+          if (Test-Path "dist\smoke_log.txt") { Write-Host "--- exe log ---"; Get-Content "dist\smoke_log.txt" | Write-Host }
+          if (Test-Path "dist\output") { Write-Host "--- dist\output ---"; Get-ChildItem "dist\output" | Format-Table Name,Length | Out-String | Write-Host } else { Write-Host "--- no dist\output ---" }
+
           if (-not (Test-Path "dist\output\CI_SMOKE.MOV")) { throw "smoke test failed: no output file" }
 
       - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/LivePhotoMaker.exe

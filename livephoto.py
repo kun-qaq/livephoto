@@ -2140,6 +2140,16 @@ def _attach_console():
 
 
 def main():
+    # 排障开关: 设了环境变量 LIVEPHOTO_LOG=<路径> 就把输出来写到文件。
+    # GUI 版 exe(无控制台) 在 CI/远程环境里 stdout 是 None, 出问题看不到任何信息。
+    _log_path = os.environ.get("LIVEPHOTO_LOG")
+    if _log_path:
+        try:
+            _lf = open(_log_path, "w", encoding="utf-8", errors="replace")
+            sys.stdout = _lf
+            sys.stderr = _lf
+        except Exception:
+            pass
     _attach_console()
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
