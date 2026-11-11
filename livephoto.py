@@ -52,7 +52,7 @@ import threading
 import uuid as uuidlib
 from pathlib import Path
 
-VERSION = "2.2.0"
+VERSION = "2.3.7"
 
 def _app_dir():
     """程序所在目录: PyInstaller 冻结时为 exe 所在目录, 否则为脚本目录。"""
