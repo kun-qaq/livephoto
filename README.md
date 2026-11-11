@@ -20,7 +20,8 @@ livephoto/
 ├── requirements.txt          # 依赖
 ├── icon.ico                  # 程序图标
 ├── docs/screenshot.png      # 界面截图
-├── build_exe.bat             # 本地打包 exe 脚本 (PyInstaller)
+├── winui3.bat                # 源码启动 / 本地打包 (run | build)
+├── build_winui3.spec         # PyInstaller 配置 (WinUI3 版)
 ├── .github/workflows/        # CI: 打 tag 自动构建并发布 Release
 └── output/                   # 转换结果输出到这里 (exe 模式输出在 exe 旁)
 ```
@@ -35,12 +36,14 @@ livephoto/
 LivePhotoMaker.exe 视频.mp4 --crop portrait --livp
 ```
 
-**方式 B：跑源码**（需要 Python 3.8+，Windows / macOS / Linux 通用，GUI 需要 tkinter）：
+**方式 B：跑源码**（CLI 子命令 Windows / macOS / Linux 通用；**GUI 仅 Windows 11**，需要 Python 3.14 + Windows App SDK 运行时）：
 
 ```bash
 pip install -r requirements.txt
-# 依赖: pillow + imageio-ffmpeg + sv-ttk + pywinstyles + darkdetect
-# (GUI 用 sv-ttk 的 Win11 Fluent 皮肤; ffmpeg 二进制由 imageio-ffmpeg 提供, 首次使用时自动下载)
+# 依赖: pillow + imageio-ffmpeg + PyWinRT 的 WinUI3 投影包
+# GUI 用真 Microsoft.UI.Xaml，共享骨架在 ../winui3_ui；
+# ffmpeg 二进制由 imageio-ffmpeg 提供，首次使用时自动下载。
+# 启动: winui3.bat run   打包: winui3.bat build
 ```
 
 ---
@@ -57,7 +60,7 @@ python livephoto.py          # 不带参数 = 打开图形界面
 
 或直接**双击** `livephoto.py`。
 
-界面采用 **Windows 11 设置页风格**（sv-ttk Fluent 皮肤 + 原生深色标题栏，字体为开源思源黑体 / Noto Sans SC），左侧导航切换三个页面：
+界面采用 **Windows 11 原生 Fluent 风格**（真 WinUI3 / `Microsoft.UI.Xaml`，NavigationView + 圆角卡片），左侧导航切换三个页面：
 
 1. **视频素材**
    - `＋ 添加视频`（可多选）/ `＋ 添加文件夹`（批量），选中某一行自动加载预览
@@ -190,16 +193,15 @@ iOS「照片」App 靠这**同一个 UUID** 把两文件配对成实况图：相
 |---|---|
 | `pillow` | GUI 预览图加载显示；`pair` 转换非 JPEG 封面；图纸占位文字 |
 | `imageio-ffmpeg` | 提供 ffmpeg 二进制（也支持用 PATH 里的 ffmpeg） |
-| `sv-ttk` | Win11 Fluent 皮肤（GUI 美化） |
-| `pywinstyles` | 原生深色标题栏 / 边框配色 |
-| `darkdetect` | 跟随 Windows 系统深浅色 |
-| `tkinter` | 图形界面（Python 标准库自带；CLI 不需要） |
+| `winrt-Microsoft.WindowsAppSDK.WinUI` 等 PyWinRT 包 | 真 WinUI3（`Microsoft.UI.Xaml`）界面；仅 GUI 需要 |
+| `winui3_ui`（本地共享骨架） | NavigationView / 卡片 / 控件封装，位于 `../winui3_ui` |
+| Windows App SDK 运行时 | WinUI3 窗口运行必需（本机 2.6.5） |
 
 ## 打包 exe（PyInstaller）
 
 仓库里已带好脚本和 CI：
 
-- **本地打包**：`pip install pyinstaller` 后双击 `build_exe.bat`（或手动执行里面的 pyinstaller 命令），产物在 `dist/LivePhotoMaker.exe`（约 49 MB，ffmpeg 二进制已内置，无需安装任何东西）
+- **本地打包**：`pip install pyinstaller` 后运行 `winui3.bat build`（等价于 `python -m PyInstaller --noconfirm build_winui3.spec`），产物在 `dist/LivePhotoMaker.exe`（约 49 MB，ffmpeg 二进制已内置）。打包需要同级上层的 `winui3_ui` 共享骨架目录。
 - **自动发布**：推一个 `v*` tag（如 `git tag v2.1.0 && git push origin v2.1.0`），GitHub Actions 会自动构建、冒烟测试、把 exe 挂到 Release
 
 exe 行为说明：无参数双击 = 图形界面；在终端里带参数运行 = 命令行模式（会自动附加到当前控制台显示输出）；转换结果默认输出到 **exe 所在目录的 `output/`** 下。

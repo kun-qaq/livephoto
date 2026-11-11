@@ -9,5 +9,5 @@ test_*.mp4
 test_src.mp4
 icon_preview.png
 *.spec
-!LivePhotoMaker.spec
+!build_winui3.spec
 .idea/

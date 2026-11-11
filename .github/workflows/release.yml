@@ -16,15 +16,16 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install deps
-        run: pip install pillow imageio-ffmpeg sv-ttk pywinstyles darkdetect pyinstaller
+        run: pip install -r requirements.txt pyinstaller
 
-      # 用仓库里的 LivePhotoMaker.spec 打包, 与本地发布版完全同一套参数,
-      # 避免命令行参数(如 --collect-data)漏掉 imageio_ffmpeg 的 ffmpeg 二进制。
+      # 用 build_winui3.spec 打包, 与本地发布版同一套参数。
+      # 注意: GUI 依赖仓库外的共享骨架 ../winui3_ui, CI 上需先提供该目录;
+      # 正式发布用的 exe 仍以本地验证过的打包结果为准。
       - name: Build exe
-        run: pyinstaller --noconfirm LivePhotoMaker.spec
+        run: pyinstaller --noconfirm build_winui3.spec
 
       - name: Smoke test (CLI convert)
         shell: pwsh

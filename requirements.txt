@@ -1,5 +1,14 @@
 pillow>=10.0.0
 imageio-ffmpeg>=0.5.0
-sv-ttk>=2.6.0
-pywinstyles>=1.8
-darkdetect>=0.8.0
+
+# WinUI3 (Microsoft.UI.Xaml) GUI, via PyWinRT.
+# Windows 11 + Windows App SDK runtime (2.6.5) required for the GUI.
+# Shared UI skeleton lives in ../winui3_ui (one level above this folder).
+typing-extensions>=4
+winrt-runtime>=4
+winrt-Microsoft.WindowsAppRuntime.Bootstrap
+winrt-Microsoft.WindowsAppSDK.WinUI
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections
+winrt-Windows.UI.Xaml.Interop
+winrt-Windows.Graphics

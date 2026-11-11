@@ -1284,26 +1284,29 @@ def cmd_pair(argv):
 # ===========================================================================
 
 def launch_gui():
-    """GUI 入口: 优先真·Fluent 界面(sv_ttk), 缺依赖则降级到经典界面。"""
-    try:
-        import sv_ttk  # noqa: F401
-        import pywinstyles  # noqa: F401
-        from PIL import Image  # noqa: F401
-        import fluent_shell  # noqa: F401
-    except Exception:
-        return launch_gui_classic()
+    """GUI 入口: 统一走 WinUI3 (Microsoft.UI.Xaml) 界面。
+
+    launch_gui_classic() 是早期 tkinter 实现，仅作为历史代码保留，不再作为
+    降级路径使用 —— 缺依赖时明确报错比悄悄换一套 UI 更容易排查。
+    """
     return launch_fluent()
 
 
 def launch_fluent(items_carry=None, mode="system"):
-    """Windows 11 设置页风格界面(真·Fluent: ttk + Sun Valley 主题)。"""
-    import tkinter as tk
-    from tkinter import filedialog, messagebox
+    """WinUI3 (Microsoft.UI.Xaml) 设置页界面."""
+    import sys
     import tempfile
     import threading
+    from pathlib import Path
     from PIL import Image
-    from fluent_shell import FluentShell
 
+    _ui_root = str(Path(__file__).resolve().parent.parent)
+    if _ui_root not in sys.path:
+        sys.path.insert(0, _ui_root)
+    from winui3_ui import FluentShell
+    from winui3_ui.tkcompat import tk, filedialog, messagebox
+
+    ACCENT = "#4cc2ff"
     OUT_DIR = _app_dir() / "output"
     PREVIEW_MAX = (640, 360)
     _preview_path = os.path.join(tempfile.gettempdir(), "_livephoto_preview.jpg")
@@ -1319,6 +1322,7 @@ def launch_fluent(items_carry=None, mode="system"):
     _ico = _app_dir() / "icon.ico"
 
     def build(app):
+        state["app"] = app
         # ============================ 页面 1: 视频素材 ============================
         pv = app.page("videos")
 
@@ -1355,8 +1359,8 @@ def launch_fluent(items_carry=None, mode="system"):
         def _scrub_cmd(_v):
             lbl_scrub.configure(text=f"{float(scl_scrub.get()):.2f}s")
             if _scrub_after["id"]:
-                app.root.after_cancel(_scrub_after["id"])
-            _scrub_after["id"] = app.root.after(240, _on_scrub)
+                state["app"].root.after_cancel(_scrub_after["id"])
+            _scrub_after["id"] = state["app"].root.after(240, _on_scrub)
 
         scl_scrub = app.slider(scrub_row, 0, 10, command=_scrub_cmd)
         scl_scrub.pack(side="left", fill="x", expand=True, padx=12)
@@ -1577,18 +1581,18 @@ def launch_fluent(items_carry=None, mode="system"):
         scale = min(PREVIEW_MAX[0] / ow, PREVIEW_MAX[1] / oh, 1.0)
         state["scale"] = scale
         disp = im.resize((max(1, int(ow * scale)), max(1, int(oh * scale))))
-        from PIL import ImageTk
-        state["tk_img"] = ImageTk.PhotoImage(disp)
+        # WinUI3 canvas consumes a PIL image directly (no ImageTk needed).
+        state["tk_img"] = disp
         canvas = state["canvas"]
         canvas.configure(width=disp.width, height=disp.height)
         canvas.delete("all")
-        canvas.create_image(0, 0, image=state["tk_img"], anchor="nw")
+        canvas.create_image(0, 0, image=disp, anchor="nw")
         state["rect_id"] = None
         if state["crop_rect"]:
             r = state["crop_rect"]
             state["rect_id"] = canvas.create_rectangle(
                 r[0] * scale, r[1] * scale, r[2] * scale, r[3] * scale,
-                outline=app.P["accent"], width=2)
+                outline=ACCENT, width=2)
         return im
 
     def _show_preview(path):
@@ -1623,7 +1627,7 @@ def launch_fluent(items_carry=None, mode="system"):
             canvas.delete(state["rect_id"])
         state["drag"] = (e.x, e.y)
         state["rect_id"] = canvas.create_rectangle(
-            e.x, e.y, e.x, e.y, outline=app.P["accent"], width=2)
+            e.x, e.y, e.x, e.y, outline=ACCENT, width=2)
 
     def _move(e):
         if state["drag"] and state["rect_id"]:
@@ -1693,8 +1697,8 @@ def launch_fluent(items_carry=None, mode="system"):
         items = list(state["items"])
         do_livp = state["var_livp"].get()
 
-        log = lambda m: app.log(m, state["txt_log"])
-        ui = app.ui
+        log = lambda m: state["app"].log(m, state["txt_log"])
+        ui = state["app"].ui
         btn_start = state["btn_start"]
         lbl_status = state["lbl_status"]
         pg = state["pg"]
@@ -1723,28 +1727,27 @@ def launch_fluent(items_carry=None, mode="system"):
                 pg.set(1.0 if ok == len(items) else 0.3),
                 log(f"✅ 完成 {ok}/{len(items)} 个, 结果在 {OUT_DIR}"),
                 lbl_status.configure(text="完成"),
-                app.toast(f"完成 {ok}/{len(items)} 个 — 已输出到 output 文件夹",
-                          ok=(ok == len(items))),
+                state["app"].toast(f"完成 {ok}/{len(items)} 个 — 已输出到 output 文件夹",
+                                   ok=(ok == len(items))),
                 btn_start.configure(state="normal", text="开始转换")))
             state["running"] = False
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # 所有嵌套函数都定义好了, 现在才创建窗口(builder 会在构造时立即调用 build)
-    app = FluentShell(title=f"LivePhoto 制作工具 v{VERSION}",
-                      app_name="LivePhoto", subtitle="视频 → 实况图",
-                      pages=PAGES, width=1060, height=760, mode=mode,
-                      icon=str(_ico) if _ico.is_file() else None,
-                      footer=f"v{VERSION}", builder=lambda a: build(a))
-    P = app.P
+    def _ready(_app):
+        # _down/_move/_up 定义在 build 之后, 所以拖拽绑定必须等窗口建好再挂。
+        c = state["canvas"]
+        c.bind("<Button-1>", _down)
+        c.bind("<B1-Motion>", _move)
+        c.bind("<ButtonRelease-1>", _up)
 
-    # 绑定裁剪拖拽(build 已在 FluentShell 初始化时执行, canvas 已存在)
-    c = state["canvas"]
-    c.bind("<Button-1>", _down)
-    c.bind("<B1-Motion>", _move)
-    c.bind("<ButtonRelease-1>", _up)
-
-    app.mainloop()
+    # Application.start() 拥有 UI 线程: 窗口、builder、on_ready 都在构造里完成,
+    # 构造不会返回(关闭窗口即退出进程), 所以不再需要 mainloop()。
+    FluentShell(title=f"LivePhoto 制作工具 v{VERSION}",
+                app_name="LivePhoto", subtitle="视频 → 实况图",
+                pages=PAGES, width=1060, height=760, mode=mode,
+                icon=str(_ico) if _ico.is_file() else None,
+                footer=f"v{VERSION}", builder=build, on_ready=_ready)
     return 0
 
 
